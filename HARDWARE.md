@@ -115,18 +115,51 @@ panel behind the rear armrest. Two versions exist:
 **4 separate CAN bus pairs** on one connector. Pin 13/14 (bus 6) is
 what aftermarket products (Feifan Commander, enhauto, etc.) connect to.
 
-#### X179 26-pin (2024+ Highland Model 3 / Juniper Model Y)
+#### X179 26-pin — two variants
+
+The 26-pin connector ships in two electrical configurations depending
+on production date. **They are not interchangeable.**
+
+##### Pre-April 2024 (Highland Model 3 early build, 2024 Juniper Model Y early build)
 
 | Pin | Signal | Notes |
 |-----|--------|-------|
-| **13** | **CAN-H** | Bus 6 (same as 20-pin) |
+| **13** | **CAN-H** | Bus 6 (Gateway-forwarded) |
 | **14** | **CAN-L** | Bus 6 |
 | **15** | **+12V** | Power (red wire, 2mm²) |
 | 18 | CAN-H | Vehicle CAN (blue wire) |
 | 19 | CAN-L | Vehicle CAN (yellow wire) |
 | **26** | **GND** | Ground (black wire, 2mm²) |
 
-### Why X179 Pin 13/14 is the best single connection point
+##### Post-April 2024 (Juniper Model Y / Highland Model 3 later builds — DoIP)
+
+> [!CAUTION]
+> Tesla migrated several pin pairs from CAN to **DoIP (100 Mbps
+> Ethernet)** starting around April 2024. **Do not assume your 26-pin
+> connector follows the pre-April 2024 layout.** Connecting a CAN
+> transceiver to a DoIP pin pair will not damage the car (the
+> transceiver simply sees no valid CAN traffic), but the transceiver
+> may fail differential-signal checks with the wrong common-mode
+> voltage.
+
+Confirmed by @0n3-70uch using oscilloscope measurements on a Berlin-built
+Model Y / 2026.14.3 (issue [#52](https://github.com/hypery11/flipper-tesla-fsd/issues/52)):
+
+| Pin | Signal on post-April 2024 build |
+|-----|------------|
+| 9 / 10 | DoIP (Ethernet) — **not** CAN |
+| 12 / 13 | DoIP (Ethernet) — **not** CAN |
+| **18 / 19** | **Vehicle CAN — only working CAN pair** |
+| 15 | +12V (unchanged) |
+| 26 | GND (unchanged) |
+
+If you are on a 2024+ Juniper or late Highland build, use **pin 18 / 19**
+(Vehicle CAN) and oscilloscope-verify before powering up the
+transceiver. A 120Ω terminator may be required at the tap point if you
+see RX errors — the Vehicle CAN bus has a Gateway-end terminator and
+your tap may sit between the two terminators.
+
+### Why X179 Pin 13/14 is the best single connection point (pre-April 2024 only)
 
 The Gateway forwards signals from **multiple internal CAN buses** onto
 bus 6 (pin 13/14). Community testing confirms that the following
