@@ -59,6 +59,7 @@
 - Read-modify-retransmit on CAN ID `0x331` — sets `DAS_autopilot` to SELF_DRIVING
 - Confirmed working on Palladium (Model S Plaid 2023), HW4 Highland (Model 3 Performance 2024), and Intel HW3 (with AP-first workaround)
 - Does NOT restore full FSD visualization — only TLSSC (stop signs / traffic lights)
+- **Recommended banned-car combination**: enable **TLSSC Restore** + **TLSSC bit38** (`0x3FD` mux 0 bit 38) together — confirmed reliable on HW3 / 2026.2.6 by @RoyRakete ([#18](https://github.com/hypery11/flipper-tesla-fsd/issues/18#issuecomment-4413430516)). Either toggle alone is unreliable on some banned firmware; the pair re-enables AP/TACC engagement
 
 ### Ban Shield (v2.9+)
 - Freezes `GTW_carConfig` (`0x7FF`) in its healthy state
@@ -103,7 +104,7 @@
 | Setting | CAN ID | Description |
 |---------|--------|-------------|
 | **Nav FSD Route** | `0x3F8` bits 13/48/49 | Enable nav-based FSD routing (EU/restricted regions) |
-| **TLSSC bit38** | `0x3FD` mux0 bit38 | Explicit TLSSC enable, complementary to 0x331 |
+| **TLSSC bit38** | `0x3FD` mux0 bit38 | Explicit TLSSC enable; pair with TLSSC Restore (0x331) as the recommended banned-car combo |
 | **Lane Graph** | `0x3FD` mux1 bit45 | UI_showLaneGraph — lane visualization on non-FSD tier |
 | **Tier Override** | `0x7FF` mux=2 | Force GTW_autopilot to SELF_DRIVING (more aggressive than Ban Shield) |
 | **Dev Mode** | `0x3F8` bit5 | UI_dasDeveloper flag |
