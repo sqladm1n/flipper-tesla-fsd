@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "fsd_checksum.h"
 #include "fsd_handler.h"
 
 static int g_pass = 0;
@@ -349,6 +350,26 @@ static void test_nag_killer(void) {
     CHECK(fsd_handle_nag_killer(&s, &in, &out2) == false, "nag skips when disabled");
 }
 
+// ── shared additive checksum kernel ───────────────────────────────────────────
+static void test_additive_checksum(void) {
+    uint8_t d[7] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
+    // 0x399 -> 0x99 + 0x03 + sum(d) ; sum(d) = 0x1B8 -> +0x9C = 0x254 -> 0x54
+    uint16_t s = 0x99 + 0x03;
+    for (int i = 0; i < 7; i++)
+        s += d[i];
+    CHECK(tesla_additive_checksum(0x399, d, 7) == (uint8_t)(s & 0xFF),
+          "kernel 0x399 got 0x%02X exp 0x%02X", tesla_additive_checksum(0x399, d, 7),
+          (uint8_t)(s & 0xFF));
+    // 2-byte SCCM-style range
+    uint8_t two[2] = {0x42, 0x07};
+    CHECK(tesla_additive_checksum(0x249, two, 2) ==
+              (uint8_t)((0x49 + 0x02 + 0x42 + 0x07) & 0xFF),
+          "kernel 0x249 2-byte");
+    // zero-length: just the folded id bytes
+    CHECK(tesla_additive_checksum(0x370, d, 0) == (uint8_t)(0x70 + 0x03),
+          "kernel len=0 -> id fold only");
+}
+
 // ── state init ────────────────────────────────────────────────────────────────
 static void test_state_init(void) {
     FSDState s;
@@ -371,6 +392,7 @@ int main(void) {
     test_track_mode_crc();
     test_sccm_crc();
     test_nag_killer();
+    test_additive_checksum();
     test_state_init();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);

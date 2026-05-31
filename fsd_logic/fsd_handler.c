@@ -1,4 +1,5 @@
 #include "fsd_handler.h"
+#include "fsd_checksum.h"
 #include <string.h>
 
 void fsd_state_init(FSDState* state, TeslaHWVersion hw) {
@@ -264,11 +265,7 @@ bool fsd_handle_legacy_autopilot(FSDState* state, CANFRAME* frame) {
 bool fsd_handle_isa_speed_chime(CANFRAME* frame) {
     if(frame->data_lenght < 8) return false;
     frame->buffer[1] |= 0x20;
-    uint8_t sum = 0;
-    for(int i = 0; i < 7; i++)
-        sum += frame->buffer[i];
-    sum += (CAN_ID_ISA_SPEED & 0xFF) + (CAN_ID_ISA_SPEED >> 8);
-    frame->buffer[7] = sum & 0xFF;
+    frame->buffer[7] = tesla_additive_checksum(CAN_ID_ISA_SPEED, frame->buffer, 7);
     return true;
 }
 
@@ -623,10 +620,7 @@ bool fsd_handle_track_mode_inject(FSDState* state, CANFRAME* frame) {
     // set track mode request ON
     frame->buffer[0] = (frame->buffer[0] & 0xFC) | 0x01;
     // recalculate Tesla vehicle checksum
-    uint16_t sum = (CAN_ID_TRACK_MODE_SET & 0xFF) + ((CAN_ID_TRACK_MODE_SET >> 8) & 0xFF);
-    for(int i = 0; i < 7; i++)
-        sum += frame->buffer[i];
-    frame->buffer[7] = (uint8_t)(sum & 0xFF);
+    frame->buffer[7] = tesla_additive_checksum(CAN_ID_TRACK_MODE_SET, frame->buffer, 7);
     return true;
 }
 
@@ -745,9 +739,7 @@ bool fsd_handle_scroll_press_inject(FSDState* state, CANFRAME* frame, uint32_t n
 //   byte2[2:0]: SCCM_turnIndicatorStalkStatus (0=IDLE 1=UP1 2=UP2 3=DN1 4=DN2)
 
 static void sccm_left_calc_crc(CANFRAME* frame) {
-    frame->buffer[0] = ((CAN_ID_SCCM_LSTALK & 0xFF) +
-                         ((CAN_ID_SCCM_LSTALK >> 8) & 0xFF) +
-                         frame->buffer[1] + frame->buffer[2]) & 0xFF;
+    frame->buffer[0] = tesla_additive_checksum(CAN_ID_SCCM_LSTALK, &frame->buffer[1], 2);
 }
 
 void fsd_build_highbeam_flash(CANFRAME* frame, uint8_t counter, bool flash_on) {
@@ -970,11 +962,7 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
     out->buffer[6] = (frame->buffer[6] & 0xF0) | cnt;
 
     // checksum: sum(byte0..6) + 0x70 + 0x03 (CAN ID 0x370 split)
-    uint16_t sum = 0;
-    for(int i = 0; i < 7; i++)
-        sum += out->buffer[i];
-    sum += (CAN_ID_EPAS_STATUS & 0xFF) + (CAN_ID_EPAS_STATUS >> 8);
-    out->buffer[7] = (uint8_t)(sum & 0xFF);
+    out->buffer[7] = tesla_additive_checksum(CAN_ID_EPAS_STATUS, out->buffer, 7);
 
     state->nag_echo_count++;
     state->nag_suppressed = true;

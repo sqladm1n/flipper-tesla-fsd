@@ -11,6 +11,7 @@
 
 #include "fsd_handler.h"
 #include "can_signals.h"
+#include "../../fsd_logic/fsd_checksum.h"  // shared Tesla additive checksum (single impl, both platforms)
 #include <string.h>
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -295,13 +296,8 @@ bool fsd_handle_isa_speed_chime(CanFrame *frame) {
     if (frame->dlc < 8) return false;
     // Set "ISA_speedLimitSoundActive" flag: bit 5 of byte 1
     frame->data[SIG_ISA_SOUND_ACTIVE_BYTE] |= SIG_ISA_SOUND_ACTIVE_MASK;
-    // Recalculate Tesla checksum: sum(byte0..6) + low(CAN_ID) + high(CAN_ID)
-    // CAN_ID_ISA_SPEED = 0x399 → low=0x99, high=0x03
-    uint8_t sum = 0;
-    for (int i = 0; i < 7; i++)
-        sum += frame->data[i];
-    sum += (uint8_t)(CAN_ID_ISA_SPEED & 0xFFu) + (uint8_t)(CAN_ID_ISA_SPEED >> 8);
-    frame->data[7] = sum;
+    // Recalculate Tesla checksum (shared impl): sum(byte0..6) + low(CAN_ID) + high(CAN_ID)
+    frame->data[7] = tesla_additive_checksum(CAN_ID_ISA_SPEED, frame->data, 7);
     return true;
 }
 
@@ -394,12 +390,8 @@ bool fsd_handle_nag_killer(FSDState *state, const CanFrame *frame, CanFrame *out
     out->data[SIG_EPAS_COUNTER_BYTE] =
         (frame->data[SIG_EPAS_COUNTER_BYTE] & SIG_EPAS_COUNTER_KEEP_MASK) | cnt;
 
-    // Checksum
-    uint16_t sum = 0;
-    for (int i = 0; i < 7; i++)
-        sum += out->data[i];
-    sum += (CAN_ID_EPAS_STATUS & 0xFFu) + (CAN_ID_EPAS_STATUS >> 8);
-    out->data[7] = (uint8_t)(sum & 0xFFu);
+    // Checksum (shared impl)
+    out->data[7] = tesla_additive_checksum(CAN_ID_EPAS_STATUS, out->data, 7);
 
     state->nag_echo_count++;
     state->nag_suppressed = true;
