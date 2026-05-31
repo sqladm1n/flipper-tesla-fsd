@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../libraries/mcp_can_2515.h"
+#include "fsd_types.h"  // CANFRAME (hardware-free); was ../libraries/mcp_can_2515.h
 #include <stdbool.h>
 #include <stdint.h>
 

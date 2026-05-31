@@ -16,8 +16,17 @@ permissions:
   contents: write   # needed for the release-upload job on tags
 
 jobs:
+  host-tests:
+    name: Host unit tests (protocol core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + run protocol-core tests
+        run: make -C test check
+
   flipper-fap:
     name: Flipper .fap (ufbt)
+    needs: [host-tests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +54,7 @@ jobs:
 
   esp32-matrix:
     name: ESP32 ${{ matrix.env }}
+    needs: [host-tests]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
