@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "fsd_can_ops.h"
+#include "fsd_capture.h"
 #include "fsd_checksum.h"
 #include "fsd_handler.h"
 
@@ -389,6 +390,25 @@ static void test_additive_checksum(void) {
           "kernel len=0 -> id fold only");
 }
 
+// ── shared candump-ASCII formatter (capture-first / cracker input) ────────────
+static void test_candump_format(void) {
+    char buf[48];
+    uint8_t d[8] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0xAA};
+    int n = tesla_format_candump_line(buf, sizeof(buf), 1500, "can0", 0x485, d, 8);
+    CHECK(strcmp(buf, "(1.500000) can0 485#00112233445566AA\n") == 0,
+          "candump 8-byte: [%s]", buf);
+    CHECK(n == (int)strlen(buf), "candump returns byte count (%d vs %zu)", n, strlen(buf));
+
+    // 11-bit ID is zero-padded to 3 hex; short DLC; elapsed seconds carry.
+    uint8_t two[2] = {0xDE, 0xAD};
+    tesla_format_candump_line(buf, sizeof(buf), 2007, "can0", 0x7, two, 2);
+    CHECK(strcmp(buf, "(2.007000) can0 007#DEAD\n") == 0, "candump short: [%s]", buf);
+
+    // DLC clamped to 8 even if a bogus larger value is passed.
+    tesla_format_candump_line(buf, sizeof(buf), 0, "can0", 0x3FD, d, 200);
+    CHECK(strcmp(buf, "(0.000000) can0 3FD#00112233445566AA\n") == 0, "candump dlc clamp: [%s]", buf);
+}
+
 // ── state init ────────────────────────────────────────────────────────────────
 static void test_state_init(void) {
     FSDState s;
@@ -413,6 +433,7 @@ int main(void) {
     test_nag_killer();
     test_can_ops();
     test_additive_checksum();
+    test_candump_format();
     test_state_init();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);

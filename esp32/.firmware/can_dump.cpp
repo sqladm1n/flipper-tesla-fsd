@@ -1,5 +1,6 @@
 #include "can_dump.h"
 #include "config.h"
+#include "../../fsd_logic/fsd_capture.h"  // shared candump-ASCII line formatter
 #include <stdarg.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,18 +164,11 @@ void can_dump_record(CanBusId bus, const CanFrame &frame) {
     if (!g_active || !g_file) return;
 
     uint32_t elapsed_ms = millis() - g_start_ms;
-    uint32_t sec  = elapsed_ms / 1000;
-    uint32_t usec = (elapsed_ms % 1000) * 1000;
 
-    // candump ASCII log: (sec.usec) can0 ID#DATA\n
+    // candump ASCII log: (sec.usec) can0 ID#DATA\n  (shared formatter)
     char line[48];
-    int pos = snprintf(line, sizeof(line), "(%lu.%06lu) %s %03X#",
-                       (unsigned long)sec, (unsigned long)usec,
-                       can_bus_name(bus), frame.id);
-    for (int i = 0; i < frame.dlc && i < 8; i++) {
-        pos += snprintf(line + pos, sizeof(line) - pos, "%02X", frame.data[i]);
-    }
-    line[pos++] = '\n';
+    int pos = tesla_format_candump_line(line, sizeof(line), elapsed_ms,
+                                        can_bus_name(bus), frame.id, frame.data, frame.dlc);
     g_file.write((const uint8_t *)line, pos);
 
     g_entries++;
