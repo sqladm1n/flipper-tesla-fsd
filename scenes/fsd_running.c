@@ -1,5 +1,6 @@
 #include "../tesla_fsd_app.h"
 #include "../scenes_config/app_scene_functions.h"
+#include "../fsd_logic/fsd_capture.h"  // shared candump-ASCII formatter
 #include <stdio.h>
 
 #define FSD_DISPLAY_REFRESH_MS 250
@@ -98,9 +99,17 @@ static void fsd_update_display(TeslaFSDApp* app, uint32_t uptime_ms) {
             app->widget, 2, 46, AlignLeft, AlignTop, FontSecondary, line4);
     }
 
-    widget_add_string_element(
-        app->widget, 64, 56, AlignCenter, AlignTop, FontSecondary,
-        "[BACK] to stop");
+    if(app->can_capture) {
+        char footer[40];
+        snprintf(footer, sizeof(footer), "REC %lu  [BACK] stop",
+            (unsigned long)app->capture_count);
+        widget_add_string_element(
+            app->widget, 64, 56, AlignCenter, AlignTop, FontSecondary, footer);
+    } else {
+        widget_add_string_element(
+            app->widget, 64, 56, AlignCenter, AlignTop, FontSecondary,
+            "[BACK] to stop");
+    }
 }
 
 static int32_t fsd_running_worker(void* context) {
@@ -128,6 +137,7 @@ static int32_t fsd_running_worker(void* context) {
     // gtw_shield_armed starts false; fsd_handle_gtw_shield() auto-arms
     // after all 8 mux snapshots are captured.
     bool shield_enabled = app->gtw_shield;
+    bool capture_enabled = app->can_capture;
     state.gtw_shield_armed = false;
     state.tlssc_restore = app->tlssc_restore;
     state.ap_first = app->ap_first;
@@ -175,6 +185,24 @@ static int32_t fsd_running_worker(void* context) {
         init_filter(mcp, 3, 0x000);
         init_filter(mcp, 4, 0x000);
         init_filter(mcp, 5, 0x000);
+    }
+
+    // CAN capture: log every RX frame to SD in candump-ASCII for the cracker /
+    // a bug report. Read-only, works in any op_mode (Listen-Only is the point).
+    File* cap_file = NULL;
+    uint32_t cap_count = 0;
+    if(capture_enabled) {
+        storage_common_mkdir(app->storage, "/ext/apps_data/tesla_mod");
+        storage_common_mkdir(app->storage, "/ext/apps_data/tesla_mod/captures");
+        char cap_path[80];
+        snprintf(cap_path, sizeof(cap_path),
+            "/ext/apps_data/tesla_mod/captures/cap_%lu.log",
+            (unsigned long)furi_get_tick());
+        cap_file = storage_file_alloc(app->storage);
+        if(!storage_file_open(cap_file, cap_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+            storage_file_free(cap_file);
+            cap_file = NULL;
+        }
     }
 
     uint32_t last_display = 0;
@@ -240,6 +268,18 @@ static int32_t fsd_running_worker(void* context) {
         if(check_receive(mcp) == ERROR_OK) {
             if(read_can_message(mcp, &frame) == ERROR_OK) {
                 state.rx_count++;
+
+                // Capture (read-only): append the raw frame to the SD log.
+                if(cap_file) {
+                    char cap_line[48];
+                    uint32_t cap_ms =
+                        (now - worker_start) * 1000 / furi_kernel_get_tick_frequency();
+                    int cap_n = tesla_format_candump_line(
+                        cap_line, sizeof(cap_line), cap_ms, "can0",
+                        frame.canId, frame.buffer, frame.data_lenght);
+                    storage_file_write(cap_file, cap_line, cap_n);
+                    cap_count++;
+                }
 
                 bool tx_allowed = fsd_can_transmit(&state);
 
@@ -401,6 +441,7 @@ static int32_t fsd_running_worker(void* context) {
                 if((now - last_display) >= furi_ms_to_ticks(FSD_DISPLAY_REFRESH_MS)) {
                     furi_mutex_acquire(app->mutex, FuriWaitForever);
                     app->fsd_state = state;
+                    app->capture_count = cap_count;
                     furi_mutex_release(app->mutex);
                     uint32_t uptime_ms = (now - worker_start) * 1000 / furi_kernel_get_tick_frequency();
                     fsd_update_display(app, uptime_ms);
@@ -413,6 +454,7 @@ static int32_t fsd_running_worker(void* context) {
             if((now - last_display) >= furi_ms_to_ticks(FSD_DISPLAY_REFRESH_MS)) {
                 furi_mutex_acquire(app->mutex, FuriWaitForever);
                 app->fsd_state = state;
+                app->capture_count = cap_count;
                 furi_mutex_release(app->mutex);
                 uint32_t uptime_ms = (now - worker_start) * 1000 / furi_kernel_get_tick_frequency();
                 fsd_update_display(app, uptime_ms);
@@ -420,6 +462,11 @@ static int32_t fsd_running_worker(void* context) {
             }
             furi_delay_ms(1);
         }
+    }
+
+    if(cap_file) {
+        storage_file_close(cap_file);
+        storage_file_free(cap_file);
     }
 
     deinit_mcp2515(mcp);
