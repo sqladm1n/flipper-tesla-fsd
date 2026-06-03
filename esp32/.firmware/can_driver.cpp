@@ -26,18 +26,32 @@ class TwaiDriver : public CanDriver {
     bool     listen_only_ = false;
     bool     installed_   = false;
     uint32_t tx_count_    = 0;
+    bool     filter_single_ = false;  // accept only filter_id_ when true
+    uint32_t filter_id_     = 0;      // standard 11-bit id for single-id capture
 
     bool install_and_start(bool listen_only) {
         twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(
             (gpio_num_t)tx_pin_,
             (gpio_num_t)rx_pin_,
             listen_only ? TWAI_MODE_LISTEN_ONLY : TWAI_MODE_NORMAL);
-        // Queue depths: 10 RX, 5 TX — sufficient for polling loop
-        g.rx_queue_len = 10;
+        // Queue depths: 64 RX (a busy Vehicle CAN can deliver thousands of
+        // frames/s; a deeper queue cuts controller-level drops between loop
+        // iterations), 5 TX.
+        g.rx_queue_len = 64;
         g.tx_queue_len = 5;
 
         twai_timing_config_t t = TWAI_TIMING_CONFIG_500KBITS();
-        twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+        twai_filter_config_t f;
+        if (filter_single_) {
+            // Standard-frame single filter: match exactly filter_id_. The id
+            // sits in bits [31:21] of the acceptance code; mask bits set to 1
+            // are "don't care", so we clear only the 11 id bits.
+            f.acceptance_code = (filter_id_ & 0x7FFu) << 21;
+            f.acceptance_mask = ~(((uint32_t)0x7FFu) << 21);
+            f.single_filter   = true;
+        } else {
+            f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+        }
 
         if (twai_driver_install(&g, &t, &f) != ESP_OK) return false;
         if (twai_start() != ESP_OK) {
@@ -104,6 +118,23 @@ public:
         stop_and_uninstall();
         if (!install_and_start(enable)) {
             Serial.printf("[CAN] %s TWAI mode switch FAILED\n", label_);
+        }
+    }
+
+    void setAcceptanceFilter(bool single, uint32_t id) override {
+        if (filter_single_ == single && (!single || filter_id_ == id)) return;
+        filter_single_ = single;
+        filter_id_     = id;
+        if (!installed_) return;  // begin() will pick up the new filter
+        bool lo = listen_only_;
+        stop_and_uninstall();
+        if (!install_and_start(lo)) {
+            Serial.printf("[CAN] %s TWAI filter switch FAILED\n", label_);
+        } else if (single) {
+            Serial.printf("[CAN] %s TWAI hardware filter -> 0x%03lX only (full-rate capture)\n",
+                          label_, (unsigned long)(id & 0x7FFu));
+        } else {
+            Serial.printf("[CAN] %s TWAI hardware filter -> accept all\n", label_);
         }
     }
 };
