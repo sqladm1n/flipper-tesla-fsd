@@ -343,9 +343,11 @@ static void test_nag_killer(void) {
     // skip paths
     CANFRAME out2;
     zero(&out2);
-    in.buffer[4] = 0x40; // handsOnLevel = 1 (hands detected)
-    CHECK(fsd_handle_nag_killer(&s, &in, &out2) == false, "nag skips when hands detected");
-    in.buffer[4] = 0x00;
+    // handsOnLevel = 1 is now suppressed (mild nag state on HW3 2019)
+    // in.buffer[4] = 0x40;
+    // CHECK(fsd_handle_nag_killer(&s, &in, &out2) == false, "nag skips when hands detected");
+    in.buffer[4] = 0x40; // handsOnLevel = 1 — now suppressed, verify it fires
+    CHECK(fsd_handle_nag_killer(&s, &in, &out2) == true, "nag fires on hands_on level 1");    in.buffer[4] = 0x00;
     s.das_hands_on_state = 0; // DAS satisfied
     CHECK(fsd_handle_nag_killer(&s, &in, &out2) == false, "nag skips when DAS satisfied");
     s.das_hands_on_state = 0xFF;
