@@ -195,7 +195,7 @@ static int32_t fsd_running_worker(void* context) {
         storage_common_mkdir(app->storage, "/ext/apps_data/tesla_mod");
         storage_common_mkdir(app->storage, "/ext/apps_data/tesla_mod/captures");
         char cap_path[80];
-        FuriHalRtcDateTime dt;
+        DateTime dt;
         furi_hal_rtc_get_datetime(&dt);
         snprintf(cap_path, sizeof(cap_path),
             "/ext/apps_data/tesla_mod/captures/cap_%04u%02u%02u_%02u%02u%02u.log",
