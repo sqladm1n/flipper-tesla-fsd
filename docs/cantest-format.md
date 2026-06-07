@@ -69,3 +69,5 @@ python3 tools/tesla_crc_cracker.py --id 0x485 apps_data/tesla_mod/captures/cap_*
 Capture from the **direct vehicle bus** (e.g. Tesla X179 pin 9/10 or OBD-II),
 not a gateway-forwarded subset bus — forwarded frames may be re-emitted without
 the original counter/CRC.
+
+
