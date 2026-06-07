@@ -919,8 +919,9 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
     // escalated alarm unsuppressed. Only skip when hands are actually
     // detected (level 1).
     uint8_t hands_on = (frame->buffer[4] >> 6) & 0x03;
-    if(hands_on == 1) return false;
-
+    // hands_on 1 = mild nag — suppress it, not just levels 0 and 3
+    // if(hands_on == 1) return false;
+    
     // DAS-aware gating: skip echo when DAS is satisfied or AP suspended.
     // das_hands_on_state is parsed from 0x39B (HW4) or 0x399 (HW3) in
     // fsd_handle_das_status_hw4 / fsd_handle_das_status_hw3.
