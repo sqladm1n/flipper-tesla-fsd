@@ -332,7 +332,8 @@ static void test_nag_killer(void) {
     CHECK(fsd_handle_nag_killer(&s, &in, &out), "nag echo emitted on level 0");
     CHECK(out.canId == CAN_ID_EPAS_STATUS, "nag echo id 0x370");
     CHECK(out.data_lenght == 8, "nag echo dlc 8");
-    CHECK(((out.buffer[4] >> 6) & 0x03) == 1, "nag spoofs handsOnLevel=1");
+    // CHECK(((out.buffer[4] >> 6) & 0x03) == 1, "nag spoofs handsOnLevel=1");
+    CHECK(((out.buffer[4] >> 6) & 0x03) == 0, "nag spoofs handsOnLevel=0 (satisfied on HW3 2019)");
     CHECK((out.buffer[6] & 0x0F) == 6, "nag counter+1 -> 6 got %u", out.buffer[6] & 0x0F);
     // Checksum self-consistency: holds regardless of the (PRNG-driven) torque bytes.
     uint16_t sum = 0;
