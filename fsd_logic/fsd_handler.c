@@ -994,7 +994,8 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
     out->buffer[3] = (uint8_t)(torq & 0xFF);
     // Clear existing handsOnLevel bits (7:6) before setting level=1.
     // OR-ing 0x40 without clearing leaves level=3 unchanged on escalated frames.
-    out->buffer[4] = (frame->buffer[4] & ~0xC0u) | 0x40u;
+    // out->buffer[4] = (frame->buffer[4] & ~0xC0u) | 0x40u;
+    out->buffer[4] = (frame->buffer[4] & ~0xC0u); // set handsOnLevel=0 = satisfied on HW3 2019
     out->buffer[5] = frame->buffer[5];
 
     // counter + 1 (byte6 lower nibble)
