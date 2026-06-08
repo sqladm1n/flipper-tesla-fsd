@@ -921,7 +921,7 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
     uint8_t hands_on = (frame->buffer[4] >> 6) & 0x03;
     // hands_on 1 = mild nag — suppress it, not just levels 0 and 3
     // if(hands_on == 1) return false;
-    
+    if(hands_on == 0) return false;  // 0 = satisfied on HW3 2019, no nag
     // DAS-aware gating: skip echo when DAS is satisfied or AP suspended.
     // das_hands_on_state is parsed from 0x39B (HW4) or 0x399 (HW3) in
     // fsd_handle_das_status_hw4 / fsd_handle_das_status_hw3.
@@ -949,7 +949,8 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
     // yellow (das 0/8 already returned above; 0xFF = unseen).
     // Source: @jewelrylin / @DrStrangeglovebox on-car data in #100.
     bool das_escalation = (das != 0xFF) && (das_prev == 0xFF || das > das_prev);
-    bool demand_now = (hands_on == 0 || hands_on == 3);
+    // bool demand_now = (hands_on == 0 || hands_on == 3); //MF HW3 2019 M3 LR
+    bool demand_now = (hands_on == 1 || hands_on == 2 || hands_on == 3);
     if((das_escalation || (demand_now && !state->nag_demand_active)) && nag_exc_frames == 0) {
         nag_exc_frames = 3 + (nag_xorshift32() % 3);          // 3-5 frame pulse
         nag_frames_until_exc = 125 + (nag_xorshift32() % 100); // reset 5-9 s cooldown
