@@ -960,6 +960,7 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
     // --- Organic torque variation ---
     // torsionBarTorque encoding: tRaw = (Nm + 20.5) / 0.01
     // d[2] lower nibble = tRaw >> 8, d[3] = tRaw & 0xFF
+    /*
     int16_t torq;
     if(nag_exc_frames > 0) {
         // Grip pulse: ~3.20 Nm ± small noise
@@ -980,6 +981,7 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
             nag_exc_frames = 3 + (nag_xorshift32() % 3); // 3-5 frames
             nag_frames_until_exc = 125 + (nag_xorshift32() % 100); // 5-9 sec
         }
+        */
     }
 
     // build echo frame
