@@ -990,8 +990,10 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
 
     out->buffer[0] = frame->buffer[0];
     out->buffer[1] = frame->buffer[1];
-    out->buffer[2] = (frame->buffer[2] & 0xF0) | (uint8_t)((torq >> 8) & 0x0F);
-    out->buffer[3] = (uint8_t)(torq & 0xFF);
+    // out->buffer[2] = (frame->buffer[2] & 0xF0) | (uint8_t)((torq >> 8) & 0x0F);
+    // out->buffer[3] = (uint8_t)(torq & 0xFF);
+    out->buffer[2] = frame->buffer[2];  // keep original torsion bar torque
+    out->buffer[3] = frame->buffer[3];  // keep original torsion bar torque
     // Clear existing handsOnLevel bits (7:6) before setting level=1.
     // OR-ing 0x40 without clearing leaves level=3 unchanged on escalated frames.
     // out->buffer[4] = (frame->buffer[4] & ~0xC0u) | 0x40u;
