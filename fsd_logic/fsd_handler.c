@@ -981,8 +981,8 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
             nag_exc_frames = 3 + (nag_xorshift32() % 3); // 3-5 frames
             nag_frames_until_exc = 125 + (nag_xorshift32() % 100); // 5-9 sec
         }
-        */
     }
+    */
 
     // build echo frame
     out->canId = CAN_ID_EPAS_STATUS;
