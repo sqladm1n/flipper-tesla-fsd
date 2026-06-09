@@ -906,7 +906,7 @@ static uint32_t nag_xorshift32(void) {
 }
 
 // Torque random walk state
-static int16_t nag_torq_walk = 2230;       // raw starting = 1.80 Nm
+// static int16_t nag_torq_walk = 2230;       // raw starting = 1.80 Nm
 static uint8_t nag_exc_frames = 0;         // frames in grip excursion
 static uint16_t nag_frames_until_exc = 175; // frames until next excursion
 
