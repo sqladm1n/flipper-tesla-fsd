@@ -199,6 +199,7 @@ static int32_t fsd_running_worker(void* context) {
     // CAN capture: log every RX frame to SD in candump-ASCII for the cracker /
     // a bug report. Read-only, works in any op_mode (Listen-Only is the point).
     File* cap_file = NULL;
+    File* cap_tx_file = NULL;  // parallel TX log: same format, same timestamp base
     uint32_t cap_count = 0;
     if(capture_enabled) {
         storage_common_mkdir(app->storage, "/ext/apps_data/tesla_mod");
@@ -215,12 +216,38 @@ static int32_t fsd_running_worker(void* context) {
             storage_file_free(cap_file);
             cap_file = NULL;
         }
+        // TX log: same name with _tx suffix before .log
+        char cap_tx_path[84];
+        snprintf(cap_tx_path, sizeof(cap_tx_path),
+            "/ext/apps_data/tesla_mod/captures/cap_%04u%02u%02u_%02u%02u%02u_tx.log",
+            dt.year, dt.month, dt.day,
+            dt.hour, dt.minute, dt.second);
+        cap_tx_file = storage_file_alloc(app->storage);
+        if(!storage_file_open(cap_tx_file, cap_tx_path, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+            storage_file_free(cap_tx_file);
+            cap_tx_file = NULL;
+        }
     }
 
     uint32_t last_display = 0;
     uint32_t last_err_check = 0;
     uint32_t last_precond = 0;
     uint32_t worker_start = furi_get_tick();
+
+// Macro: transmit a frame and, if the TX log is open, append a candump line.
+// `_f` is a CANFRAME*. Uses `now` and `worker_start` from the enclosing scope.
+#define SEND_AND_LOG(_f)                                                              \
+    do {                                                                              \
+        send_can_frame(mcp, (_f));                                                    \
+        if(cap_tx_file) {                                                             \
+            char _tl[48];                                                             \
+            uint32_t _ms = (now - worker_start) * 1000 /                             \
+                           furi_kernel_get_tick_frequency();                          \
+            int _n = tesla_format_candump_line(_tl, sizeof(_tl), _ms, "can0",        \
+                         (_f)->canId, (_f)->buffer, (_f)->data_lenght);               \
+            storage_file_write(cap_tx_file, _tl, _n);                                \
+        }                                                                             \
+    } while(0)
 
     while(true) {
         uint32_t flags = furi_thread_flags_get();
@@ -249,7 +276,7 @@ static int32_t fsd_running_worker(void* context) {
                fsd_can_transmit(&state) && (now - last_strobe) >= furi_ms_to_ticks(200)) {
                 CANFRAME sf;
                 fsd_build_highbeam_flash(&sf, strobe_counter, strobe_phase);
-                send_can_frame(mcp, &sf);
+                SEND_AND_LOG(&sf);
                 strobe_counter = (strobe_counter + 1) & 0x0F;
                 strobe_phase = !strobe_phase;
                 last_strobe = now;
@@ -266,7 +293,7 @@ static int32_t fsd_running_worker(void* context) {
                 CANFRAME tf;
                 uint8_t dir = state.extra_turn_left ? 3 : 1; // 3=DOWN_1(left) 1=UP_1(right)
                 fsd_build_turn_signal(&tf, turn_counter, dir);
-                send_can_frame(mcp, &tf);
+                SEND_AND_LOG(&tf);
                 turn_counter = (turn_counter + 1) & 0x0F;
                 last_turn = now;
             }
@@ -277,7 +304,7 @@ static int32_t fsd_running_worker(void* context) {
            (now - last_precond) >= furi_ms_to_ticks(PRECOND_INTERVAL_MS)) {
             CANFRAME pf;
             fsd_build_precondition_frame(&pf);
-            send_can_frame(mcp, &pf);
+            SEND_AND_LOG(&pf);
             last_precond = now;
         }
 
@@ -356,7 +383,7 @@ static int32_t fsd_running_worker(void* context) {
                 }
                 else if(frame.canId == CAN_ID_DAS_AP_CONFIG) {
                     if(fsd_handle_tlssc_restore(&state, &frame) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 }
                 else if(frame.canId == CAN_ID_ENERGY_CONS) {
@@ -369,17 +396,17 @@ static int32_t fsd_running_worker(void* context) {
                     // override forces tier=3. Don't send two conflicting copies.
                     if(shield_enabled) {
                         if(fsd_handle_gtw_shield(&state, &frame) && tx_allowed) {
-                            send_can_frame(mcp, &frame);
+                            SEND_AND_LOG(&frame);
                         }
                     } else if(fsd_handle_gtw_tier_override(&state, &frame) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 }
 
                 // Track Mode inject (Service mode only, 0x313)
                 if(frame.canId == CAN_ID_TRACK_MODE_SET) {
                     if(fsd_handle_track_mode_inject(&state, &frame) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 }
                 else if(frame.canId == CAN_ID_DAS_CONTROL) {
@@ -404,10 +431,10 @@ static int32_t fsd_running_worker(void* context) {
                 // Extras: write handlers (Service mode only, gated inside each handler)
                 if(frame.canId == CAN_ID_VCFRONT_LIGHT) {
                     if(fsd_handle_hazard_inject(&state, &frame) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                     if(fsd_handle_wiper_off(&state, &frame) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 }
 
@@ -418,7 +445,7 @@ static int32_t fsd_running_worker(void* context) {
                     if(state.nag_killer) {
                         CANFRAME echo;
                         if(fsd_handle_nag_killer(&state, &frame, &echo) && tx_allowed) {
-                            send_can_frame(mcp, &echo);
+                            SEND_AND_LOG(&echo);
                         }
                     }
                 }
@@ -429,7 +456,7 @@ static int32_t fsd_running_worker(void* context) {
                 if(state.hands_on_spoof) {
                     CANFRAME ho_frame;
                     if(fsd_handle_hands_on_spoof(&state, &frame, &ho_frame, now) && tx_allowed) {
-                        send_can_frame(mcp, &ho_frame);
+                        SEND_AND_LOG(&ho_frame);
                     }
                 }
 
@@ -438,7 +465,7 @@ static int32_t fsd_running_worker(void* context) {
                     fsd_handle_legacy_stalk(&state, &frame);
                 } else if(frame.canId == CAN_ID_AP_LEGACY && state.hw_version == TeslaHW_Legacy) {
                     if(fsd_handle_legacy_autopilot(&state, &frame, now) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 } else if(frame.canId == CAN_ID_ISA_SPEED) {
                     // 0x399 is HW-dependent: HW4 = ISA chime, HW3/Legacy = DAS_status.
@@ -454,7 +481,7 @@ static int32_t fsd_running_worker(void* context) {
                         }
                         if(state.suppress_speed_chime &&
                            fsd_handle_isa_speed_chime(&frame) && tx_allowed) {
-                            send_can_frame(mcp, &frame);
+                            SEND_AND_LOG(&frame);
                         }
                     } else {
                         fsd_handle_das_status_hw3(&state, &frame);
@@ -462,15 +489,15 @@ static int32_t fsd_running_worker(void* context) {
                 } else if(frame.canId == CAN_ID_FOLLOW_DIST) {
                     fsd_handle_follow_distance(&state, &frame);
                     if(fsd_handle_driver_assist_override(&state, &frame) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 } else if(frame.canId == CAN_ID_AP_CONTROL) {
                     if(fsd_handle_autopilot_frame(&state, &frame, now) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 } else if(frame.canId == CAN_ID_VCLEFT_SWITCH) {
                     if(fsd_handle_scroll_press_inject(&state, &frame, now) && tx_allowed) {
-                        send_can_frame(mcp, &frame);
+                        SEND_AND_LOG(&frame);
                     }
                 }
 
@@ -503,6 +530,10 @@ static int32_t fsd_running_worker(void* context) {
     if(cap_file) {
         storage_file_close(cap_file);
         storage_file_free(cap_file);
+    }
+    if(cap_tx_file) {
+        storage_file_close(cap_tx_file);
+        storage_file_free(cap_tx_file);
     }
 
     deinit_mcp2515(mcp);
