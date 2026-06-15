@@ -37,6 +37,13 @@ typedef struct FSDState {
     bool nag_demand_active;    // true while handsOnLevel == 0 or 3 — edge-detect source for on-demand grip pulse
     bool continuous_ap;         // re-enable AP after AP drops while turn signal is active
 
+    // --- 0x247 Hands-On Spoof (nag satisfier) ---
+    bool hands_on_spoof;         // user toggle: inject 0x247 to satisfy nag
+    bool hands_on_nag_active;    // true while 3E9 byte2 == 0x22 (nag present)
+    uint16_t hands_on_phase;     // injection frame counter (reset on each new nag)
+    uint8_t hands_on_steer_hi;   // last seen 0x247 byte0 (steering angle hi), for pass-through
+    uint32_t hands_on_nag_ms;    // ms when current nag started
+
     // operation mode + diagnostics
     OpMode op_mode;
     bool tesla_ota_in_progress;  // pause TX while Tesla is updating

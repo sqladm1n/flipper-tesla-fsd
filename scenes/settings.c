@@ -31,6 +31,13 @@ static void nag_killer_changed(VariableItem* item) {
     app->nag_killer = (idx == 1);
 }
 
+static void hands_on_spoof_changed(VariableItem* item) {
+    TeslaFSDApp* app = variable_item_get_context(item);
+    uint8_t idx = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, toggle_text[idx]);
+    app->hands_on_spoof = (idx == 1);
+}
+
 // Order matches OpMode in fsd_types.h: ListenOnly=0, Active=1, Service=2.
 static const char* const op_mode_text[] = {"Listen", "Active", "Service"};
 static void op_mode_changed(VariableItem* item) {
@@ -173,6 +180,7 @@ void tesla_fsd_scene_settings_on_enter(void* context) {
 
     // ── Stable features (car-tested) ──
     ADD_TOGGLE("Nag Killer",       nag_killer_changed,       nag_killer)
+    ADD_TOGGLE("Hands-On Spoof",   hands_on_spoof_changed,   hands_on_spoof)
     ADD_TOGGLE("Force FSD",        force_fsd_changed,        force_fsd)
     ADD_TOGGLE("TLSSC Restore",    tlssc_restore_changed,    tlssc_restore)
     ADD_TOGGLE("AP-First (14.x)",  ap_first_changed,         ap_first)

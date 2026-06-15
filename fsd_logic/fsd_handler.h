@@ -248,3 +248,46 @@ void fsd_handle_steering_angle(FSDState* state, const CANFRAME* frame);
 
 /** Parse DAS_steeringControl (0x488) — DAS steering request type + angle. */
 void fsd_handle_das_steering(FSDState* state, const CANFRAME* frame);
+
+// ─── 0x247 Hands-On Spoof (nag satisfier, VehicleBus) ────────────────────────
+
+#define CAN_ID_DAS_HANDSON_SPOOF  0x247  // DAS hands-on torque spoofing target
+
+/** Build a 0x247 frame that reports hands-on torque to DAS, satisfying the
+ *  "Apply slight pressure on steering wheel" nag without driver input.
+ *
+ *  Source: reverse-engineered from Model 3 LR HW3 VehicleBus captures
+ *  (cap_20260612_214035.log + cap_20260611_190335/190950/191241/191311.log).
+ *  Observed behaviour across 5 confirmed nag-clear events:
+ *
+ *    Byte  Meaning
+ *    ----  -------
+ *    0     Steering angle high byte (pass-through from last seen frame; ~0x3C-0x90)
+ *    1     0x0D — fixed marker byte, always 0x0D in hands-on state
+ *    2     0xFF — fixed
+ *    3     Torque magnitude, 0x0D–0x10 = hands detected; 0x00 = no hands
+ *    4     0x00 — fixed
+ *    5-6   Cumulative torque integral, little-endian uint16; ramps 0x40→0xE0+
+ *          during a sustained touch.  DAS requires this to exceed ~0x80 before
+ *          it accepts the touch and clears the nag (~1-3 s at normal injection
+ *          rate).
+ *    7     0x00 — fixed
+ *
+ *  The "integral" in bytes 5-6 mimics the energy the driver's hand deposits on
+ *  the torsion bar: a sudden 0x0E with a cold integral is insufficient; the
+ *  ramp is required.  The nag clears when 3E9 byte2 transitions 0x22→0x20.
+ *
+ *  `phase` is the caller's injection counter (frames since injection started).
+ *  Pass an incrementing counter; once the nag clears, stop injecting.
+ *
+ *  Returns true always (frame is always ready to send when called). */
+bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t steer_angle_hi, uint16_t phase);
+
+/** Stateful wrapper: call on every received frame.
+ *  - Watches 0x3E9 byte2 for nag (0x22) and clear (0x20) transitions.
+ *  - When nag is active, builds and returns a 0x247 spoof frame in out_frame.
+ *  - Resets internal phase counter on each new nag event.
+ *  - `now_ms`: millisecond clock (pass furi_get_tick()).
+ *  Returns true if out_frame was populated and should be transmitted. */
+bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
+                                CANFRAME* out_frame, uint32_t now_ms);

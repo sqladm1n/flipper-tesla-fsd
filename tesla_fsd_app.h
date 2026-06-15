@@ -80,6 +80,7 @@ typedef struct {
     bool suppress_speed_chime;
     bool emergency_vehicle_detect;
     bool nag_killer;
+    bool hands_on_spoof;     // 0x247 inject to satisfy "Apply pressure" nag
     bool precondition;       // periodic 0x082 inject for battery preheat
     OpMode op_mode;          // Active / ListenOnly / Service
     uint8_t mcp_clock;       // 0 = 16MHz (default), 1 = 8MHz
