@@ -86,11 +86,12 @@ static void fsd_update_display(TeslaFSDApp* app, uint32_t uptime_ms) {
             (double)state.soc_percent, (double)kw,
             state.batt_temp_min_c, state.batt_temp_max_c);
     } else {
-        snprintf(line4, sizeof(line4), "%s%s%s%s%s%s",
+        snprintf(line4, sizeof(line4), "%s%s%s%s%s%s%s",
             state.force_fsd ? "FORCE " : "",
             state.suppress_speed_chime ? "CHIME " : "",
             state.emergency_vehicle_detect ? "EMRG " : "",
             state.nag_killer ? "NAG " : "",
+            state.hands_on_spoof ? (state.hands_on_nag_active ? "HON! " : "HON ") : "",
             state.precondition ? "PRECOND " : "",
             state.tlssc_restore ? "TLSSC" : "");
     }
@@ -123,6 +124,7 @@ static int32_t fsd_running_worker(void* context) {
     state.suppress_speed_chime = app->suppress_speed_chime;
     state.emergency_vehicle_detect = app->emergency_vehicle_detect;
     state.nag_killer = app->nag_killer;
+    state.hands_on_spoof = app->hands_on_spoof;
     state.precondition = app->precondition;
     state.op_mode = app->op_mode;
     // extras
@@ -412,6 +414,19 @@ static int32_t fsd_running_worker(void* context) {
                             send_can_frame(mcp, &echo);
                         }
                     }
+                }
+
+                // 0x247 Hands-On Spoof: feed every frame so the handler can
+                // snoop 0x247 (angle pass-through) and watch 0x3E9 (nag state).
+                // Produces a 0x247 TX only while the nag is active.
+                if(state.hands_on_spoof) {
+                    CANFRAME ho_frame;
+                    if(fsd_handle_hands_on_spoof(&state, &frame, &ho_frame, now) && tx_allowed) {
+                        send_can_frame(mcp, &ho_frame);
+                    }
+                }
+
+                if(false) {  // dummy branch to keep else-if chain intact below
                 } else if(frame.canId == CAN_ID_STW_ACTN_RQ && state.hw_version == TeslaHW_Legacy) {
                     fsd_handle_legacy_stalk(&state, &frame);
                 } else if(frame.canId == CAN_ID_AP_LEGACY && state.hw_version == TeslaHW_Legacy) {
