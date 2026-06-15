@@ -41,8 +41,11 @@ typedef struct FSDState {
     bool hands_on_spoof;         // user toggle: inject 0x247 to satisfy nag
     bool hands_on_nag_active;    // true while 3E9 byte2 == 0x22 (nag present)
     uint16_t hands_on_phase;     // injection frame counter (reset on each new nag)
-    uint8_t hands_on_steer_hi;   // last seen 0x247 byte0 (steering angle hi), for pass-through
+    uint8_t hands_on_steer_hi;   // last seen 0x247 byte0 (steering angle hi), pass-through
+    uint8_t hands_on_b1;         // last seen 0x247 byte1 (varies 0x0E/0x0F), pass-through
+    uint16_t hands_on_integral;  // last seen 0x247 bytes5-6 integral, seed for ramp
     uint32_t hands_on_nag_ms;    // ms when current nag started
+    uint32_t hands_on_tx_count;  // total 0x247 frames injected (HUD diagnostic)
 
     // operation mode + diagnostics
     OpMode op_mode;

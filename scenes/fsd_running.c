@@ -66,10 +66,17 @@ static void fsd_update_display(TeslaFSDApp* app, uint32_t uptime_ms) {
         app->widget, 2, 26, AlignLeft, AlignTop, FontSecondary, line2);
 
     char line3[44];
-    snprintf(line3, sizeof(line3), "TX:%lu RX:%lu Err:%lu",
-        (unsigned long)state.frames_modified,
-        (unsigned long)state.rx_count,
-        (unsigned long)state.crc_err_count);
+    if(state.hands_on_spoof) {
+        snprintf(line3, sizeof(line3), "TX:%lu RX:%lu HON:%lu",
+            (unsigned long)state.frames_modified,
+            (unsigned long)state.rx_count,
+            (unsigned long)state.hands_on_tx_count);
+    } else {
+        snprintf(line3, sizeof(line3), "TX:%lu RX:%lu Err:%lu",
+            (unsigned long)state.frames_modified,
+            (unsigned long)state.rx_count,
+            (unsigned long)state.crc_err_count);
+    }
     widget_add_string_element(
         app->widget, 2, 36, AlignLeft, AlignTop, FontSecondary, line3);
 

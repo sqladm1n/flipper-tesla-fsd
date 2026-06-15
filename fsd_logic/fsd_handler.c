@@ -1058,9 +1058,8 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
 //   The integral climbs by roughly 0x04-0x08 per frame at normal touch.
 //   We ramp at +6/frame which reaches 0x80 in ~22 frames (~3 s at 7 Hz).
 
-// Per-instance static state for the phase walk
-static uint16_t hands_on_integral = 0x0040;  // ramp start
-static uint8_t  hands_on_torq_byte = 0x0E;   // alternate 0x0D/0x0E/0x0F
+// Per-instance static state for the torque byte walk
+static uint8_t  hands_on_torq_byte = 0x0E;
 
 // PRNG — reuse the same xorshift32 family as the nag killer
 static uint32_t ho_xorshift32(void) {
@@ -1071,65 +1070,80 @@ static uint32_t ho_xorshift32(void) {
     return ho_prng_state;
 }
 
-bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t steer_angle_hi, uint16_t phase) {
+bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t steer_angle_hi, uint8_t b1,
+                               uint16_t* integral, uint16_t phase) {
     frame->canId = CAN_ID_DAS_HANDSON_SPOOF;
     frame->data_lenght = 8;
     frame->ext = 0;
     frame->req = 0;
 
-    // Ramp the integral: start from 0x40, add ~6 ± small noise per frame,
-    // cap at 0xFF00 (uint16 max safe value for the two-byte field).
-    // Reset on phase==0 so each new nag event starts a fresh ramp.
-    if(phase == 0) {
-        hands_on_integral = 0x0040;
-        hands_on_torq_byte = 0x0E;
-    } else {
+    // Ramp the integral from whatever value was live on the bus when the nag
+    // started — seeded in fsd_handle_hands_on_spoof from the last snooped
+    // 0x247 frame.  Add ~6 ± noise per frame; cap at 0xFF00.
+    // phase==0 means first injection frame; integral is already seeded.
+    if(phase > 0) {
         uint8_t step = (uint8_t)(4 + (ho_xorshift32() % 5));  // 4-8 per frame
-        uint16_t next = hands_on_integral + step;
-        hands_on_integral = (next > 0xFF00u) ? 0xFF00u : next;
-
-        // Vary torque byte slightly: 0x0D / 0x0E / 0x0F to look organic
-        hands_on_torq_byte = (uint8_t)(0x0D + (ho_xorshift32() % 3));
+        uint16_t next = *integral + step;
+        *integral = (next > 0xFF00u) ? 0xFF00u : next;
     }
 
-    frame->buffer[0] = steer_angle_hi;   // steering angle hi byte (pass-through)
-    frame->buffer[1] = 0x0D;             // fixed marker
-    frame->buffer[2] = 0xFF;             // fixed
-    frame->buffer[3] = hands_on_torq_byte;
-    frame->buffer[4] = 0x00;             // fixed
-    frame->buffer[5] = (uint8_t)(hands_on_integral & 0xFF);   // integral lo
-    frame->buffer[6] = (uint8_t)((hands_on_integral >> 8) & 0xFF); // integral hi
-    frame->buffer[7] = 0x00;             // fixed
+    // Torque byte: vary 0x0D/0x0E/0x0F organically, matching observed range.
+    hands_on_torq_byte = (uint8_t)(0x0D + (ho_xorshift32() % 3));
+
+    frame->buffer[0] = steer_angle_hi;              // byte0: steer angle hi (pass-through)
+    frame->buffer[1] = b1;                           // byte1: pass-through (0x0E/0x0F observed)
+    frame->buffer[2] = 0xFF;                         // byte2: fixed
+    frame->buffer[3] = hands_on_torq_byte;           // byte3: torque magnitude
+    frame->buffer[4] = 0x00;                         // byte4: fixed
+    frame->buffer[5] = (uint8_t)(*integral & 0xFF);  // byte5: integral lo
+    frame->buffer[6] = (uint8_t)((*integral >> 8) & 0xFF); // byte6: integral hi
+    frame->buffer[7] = 0x00;                         // byte7: fixed
 
     return true;
 }
 
 bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
                                 CANFRAME* out_frame, uint32_t now_ms) {
-    (void)now_ms;  // available for future timeout logic
-
     if(!state->hands_on_spoof) return false;
     if(!fsd_can_transmit(state)) return false;
 
-    // Snoop incoming 0x247 frames to keep the steering angle pass-through fresh
-    if(rx_frame->canId == CAN_ID_DAS_HANDSON_SPOOF && rx_frame->data_lenght >= 1) {
+    // Snoop incoming 0x247 frames: keep byte0, byte1, and bytes5-6 integral
+    // fresh so injected frames blend into the live bus traffic.
+    // byte1 varies (0x0E/0x0F observed across captures) — must pass-through,
+    // not hardcode.  Integral is seeded from the live value at nag-start so
+    // the ramp starts from the correct baseline rather than a cold 0x0040.
+    if(rx_frame->canId == CAN_ID_DAS_HANDSON_SPOOF && rx_frame->data_lenght >= 7) {
         state->hands_on_steer_hi = rx_frame->buffer[0];
+        state->hands_on_b1       = rx_frame->buffer[1];
+        // Only update integral seed while NOT actively injecting, so we don't
+        // confuse our own TX frames with the car's native frames.
+        if(!state->hands_on_nag_active) {
+            state->hands_on_integral =
+                (uint16_t)rx_frame->buffer[5] | ((uint16_t)rx_frame->buffer[6] << 8);
+        }
     }
 
-    // Watch 0x3E9 (DAS_status) for nag transitions
-    // byte2 == 0x22: autosteer active + hands-on required (nag)
-    // byte2 == 0x20: autosteer active, hands satisfied (clear)
-    if(rx_frame->canId == 0x3E9 && rx_frame->data_lenght >= 6) {
+    // Watch 0x3E9 byte2 for nag transitions:
+    //   0x22 = autosteer active + hands required (nag)
+    //   0x20 = autosteer active, hands satisfied
+    //   anything else = AP not active, stop injecting
+    if(rx_frame->canId == 0x3E9 && rx_frame->data_lenght >= 3) {
         uint8_t b2 = rx_frame->buffer[2];
         bool nag_now = (b2 == 0x22);
+        bool ap_active = (b2 == 0x20 || b2 == 0x22);
 
         if(nag_now && !state->hands_on_nag_active) {
-            // Rising edge: new nag event — reset phase counter
+            // Rising edge: new nag — start injection from live integral baseline
             state->hands_on_nag_active = true;
             state->hands_on_phase = 0;
             state->hands_on_nag_ms = now_ms;
-        } else if(!nag_now) {
-            // Nag cleared or AP disengaged — stop injecting
+            // integral already seeded from last snooped native frame
+        } else if(!ap_active) {
+            // AP disengaged entirely — reset
+            state->hands_on_nag_active = false;
+            state->hands_on_phase = 0;
+        } else if(!nag_now && state->hands_on_nag_active) {
+            // Nag cleared (0x20) — stop injecting
             state->hands_on_nag_active = false;
             state->hands_on_phase = 0;
         }
@@ -1137,16 +1151,11 @@ bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
 
     if(!state->hands_on_nag_active) return false;
 
-    // Build and return the spoof frame
-    fsd_build_hands_on_spoof(out_frame, state->hands_on_steer_hi, state->hands_on_phase);
+    fsd_build_hands_on_spoof(out_frame, state->hands_on_steer_hi, state->hands_on_b1,
+                              &state->hands_on_integral, state->hands_on_phase);
 
-    // Clamp phase counter so it doesn't overflow; once integral is saturated
-    // further incrementing is meaningless but we keep the counter moving so
-    // the caller can detect stalls.
-    if(state->hands_on_phase < 0xFFFFu) {
-        state->hands_on_phase++;
-    }
-
-    state->nag_suppressed = true;  // share the existing "nag handled" flag
+    if(state->hands_on_phase < 0xFFFFu) state->hands_on_phase++;
+    state->hands_on_tx_count++;
+    state->nag_suppressed = true;
     return true;
 }

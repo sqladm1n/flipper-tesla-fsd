@@ -281,7 +281,8 @@ void fsd_handle_das_steering(FSDState* state, const CANFRAME* frame);
  *  Pass an incrementing counter; once the nag clears, stop injecting.
  *
  *  Returns true always (frame is always ready to send when called). */
-bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t steer_angle_hi, uint16_t phase);
+bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t steer_angle_hi, uint8_t b1,
+                               uint16_t* integral, uint16_t phase);
 
 /** Stateful wrapper: call on every received frame.
  *  - Watches 0x3E9 byte2 for nag (0x22) and clear (0x20) transitions.
