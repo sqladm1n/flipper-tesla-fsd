@@ -1035,31 +1035,31 @@ bool fsd_handle_nag_killer(FSDState* state, const CANFRAME* frame, CANFRAME* out
 //
 //   Reverse-engineered from 5 confirmed nag-clear events across 7 captures
 //   (cap_20260611_190335/190950/191104/191241/191311.log and
-//    cap_20260612_213729/214035.log).  No checksum protection observed; the
-//   byte3 torque magnitude and the bytes 5-6 integral are the key signals.
+//    cap_20260612_213729/214035.log and cap_20260615_221213.log).
 //
-// Frame layout (8 bytes, ID 0x247):
-//   [0] steer_angle_hi  — pass-through of last seen 0x247[0]; ~0x3C-0x90
-//   [1] 0x0D            — fixed marker, always 0x0D in hands-on state
+// Frame layout (8 bytes, ID 0x247) — corrected from log analysis:
+//   [0] torque          — hands-off baseline ~0x96-0x9E; spikes 0xC0-0xFF on touch
+//   [1] 0x0E            — fixed (0x0E/0x0F observed; pass-through)
 //   [2] 0xFF            — fixed
-//   [3] torque          — 0x0D-0x10 = hands detected; 0x00 = no touch
+//   [3] status          — 0x0B/0x0C, unchanged on touch; pass-through
 //   [4] 0x00            — fixed
-//   [5] integral_lo     — cumulative torque integral low byte
-//   [6] integral_hi     — cumulative torque integral high byte (little-endian)
+//   [5] integral_lo     — slowly-incrementing odometer, little-endian uint16
+//   [6] integral_hi     — integral high byte (climbs regardless of touch)
 //   [7] 0x00            — fixed
 //
-// The integral ramps from ~0x40 at touch-start to 0xE0+ during sustained hold.
-// DAS requires the integral to exceed ~0x80 before clearing the nag (~1-3 s at
-// typical injection rate of 5 Hz).  Injecting a cold full-value torque byte
-// without the ramp does NOT satisfy the nag — the integral is required.
+// Key finding (cap_20260615_221213.log, nag t=27.4->34.28):
+//   Byte 0 spikes from baseline ~0x96 to 0xCE/0xEC/0xF8 just before the nag
+//   clears.  Bytes 3, 5-6 are largely constant during the event.  Byte 0 is
+//   the torque magnitude DAS reads; the integral (bytes 5-6) is an odometer
+//   that climbs continuously and is NOT the trigger.
 //
-// Integral timing (from captures):
-//   Typical rate: one 0x247 frame every ~0.1-0.2 s on VehicleBus.
-//   The integral climbs by roughly 0x04-0x08 per frame at normal touch.
-//   We ramp at +6/frame which reaches 0x80 in ~22 frames (~3 s at 7 Hz).
+// Injection strategy:
+//   Hold byte0 at 0xD0-0xFF (well above baseline) for several frames.
+//   Pass through byte1, byte3 from live bus so the frame looks native.
+//   Integral (bytes 5-6) seeded from live bus and allowed to drift naturally.
 
 // Per-instance static state for the torque byte walk
-static uint8_t  hands_on_torq_byte = 0x0E;
+static uint8_t  hands_on_torq_byte = 0xD8;
 
 // PRNG — reuse the same xorshift32 family as the nag killer
 static uint32_t ho_xorshift32(void) {
@@ -1070,34 +1070,33 @@ static uint32_t ho_xorshift32(void) {
     return ho_prng_state;
 }
 
-bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t steer_angle_hi, uint8_t b1,
+bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t b1, uint8_t b3,
                                uint16_t* integral, uint16_t phase) {
     frame->canId = CAN_ID_DAS_HANDSON_SPOOF;
     frame->data_lenght = 8;
     frame->ext = 0;
     frame->req = 0;
 
-    // Ramp the integral from whatever value was live on the bus when the nag
-    // started — seeded in fsd_handle_hands_on_spoof from the last snooped
-    // 0x247 frame.  Add ~6 ± noise per frame; cap at 0xFF00.
-    // phase==0 means first injection frame; integral is already seeded.
+    // Vary torque byte (byte0) in range 0xC8-0xF8 to look organic.
+    // Observed peak range on real touches: 0xCE-0xF8.
+    hands_on_torq_byte = (uint8_t)(0xC8 + (ho_xorshift32() % 0x30));
+
+    // Integral: seed from live bus, drift naturally (+4-8/frame).
+    // Not the primary trigger but must stay plausible.
     if(phase > 0) {
-        uint8_t step = (uint8_t)(4 + (ho_xorshift32() % 5));  // 4-8 per frame
+        uint8_t step = (uint8_t)(4 + (ho_xorshift32() % 5));
         uint16_t next = *integral + step;
         *integral = (next > 0xFF00u) ? 0xFF00u : next;
     }
 
-    // Torque byte: vary 0x0D/0x0E/0x0F organically, matching observed range.
-    hands_on_torq_byte = (uint8_t)(0x0D + (ho_xorshift32() % 3));
-
-    frame->buffer[0] = steer_angle_hi;              // byte0: steer angle hi (pass-through)
-    frame->buffer[1] = b1;                           // byte1: pass-through (0x0E/0x0F observed)
-    frame->buffer[2] = 0xFF;                         // byte2: fixed
-    frame->buffer[3] = hands_on_torq_byte;           // byte3: torque magnitude
-    frame->buffer[4] = 0x00;                         // byte4: fixed
-    frame->buffer[5] = (uint8_t)(*integral & 0xFF);  // byte5: integral lo
+    frame->buffer[0] = hands_on_torq_byte;           // byte0: TORQUE (the key signal)
+    frame->buffer[1] = b1;                            // byte1: pass-through (0x0E/0x0F)
+    frame->buffer[2] = 0xFF;                          // byte2: fixed
+    frame->buffer[3] = b3;                            // byte3: status pass-through (0x0B/0x0C)
+    frame->buffer[4] = 0x00;                          // byte4: fixed
+    frame->buffer[5] = (uint8_t)(*integral & 0xFF);   // byte5: integral lo
     frame->buffer[6] = (uint8_t)((*integral >> 8) & 0xFF); // byte6: integral hi
-    frame->buffer[7] = 0x00;                         // byte7: fixed
+    frame->buffer[7] = 0x00;                          // byte7: fixed
 
     return true;
 }
@@ -1107,14 +1106,14 @@ bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
     if(!state->hands_on_spoof) return false;
     if(!fsd_can_transmit(state)) return false;
 
-    // Snoop incoming 0x247 frames: keep byte0, byte1, and bytes5-6 integral
+    // Snoop incoming 0x247 frames: keep byte1, byte3, and bytes5-6 integral
     // fresh so injected frames blend into the live bus traffic.
-    // byte1 varies (0x0E/0x0F observed across captures) — must pass-through,
-    // not hardcode.  Integral is seeded from the live value at nag-start so
-    // the ramp starts from the correct baseline rather than a cold 0x0040.
+    // byte0 = torque (we override this with our spike value).
+    // byte1 varies (0x0E/0x0F); byte3 = status byte (0x0B/0x0C), both pass-through.
+    // Integral seeded from live value at nag-start so the ramp starts plausibly.
     if(rx_frame->canId == CAN_ID_DAS_HANDSON_SPOOF && rx_frame->data_lenght >= 7) {
-        state->hands_on_steer_hi = rx_frame->buffer[0];
         state->hands_on_b1       = rx_frame->buffer[1];
+        state->hands_on_b3       = rx_frame->buffer[3];
         // Only update integral seed while NOT actively injecting, so we don't
         // confuse our own TX frames with the car's native frames.
         if(!state->hands_on_nag_active) {
@@ -1151,7 +1150,7 @@ bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
 
     if(!state->hands_on_nag_active) return false;
 
-    fsd_build_hands_on_spoof(out_frame, state->hands_on_steer_hi, state->hands_on_b1,
+    fsd_build_hands_on_spoof(out_frame, state->hands_on_b1, state->hands_on_b3,
                               &state->hands_on_integral, state->hands_on_phase);
 
     if(state->hands_on_phase < 0xFFFFu) state->hands_on_phase++;
