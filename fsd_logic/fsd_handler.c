@@ -1070,7 +1070,7 @@ static uint32_t ho_xorshift32(void) {
     return ho_prng_state;
 }
 
-bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t b1, uint8_t b3,
+bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t b1, uint8_t b3 __attribute__((unused)),
                                uint16_t* integral, uint16_t phase) {
     frame->canId = CAN_ID_DAS_HANDSON_SPOOF;
     frame->data_lenght = 8;
