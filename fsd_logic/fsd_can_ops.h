@@ -2,6 +2,7 @@
 /*
  * fsd_can_ops.h — stateless Tesla CAN frame primitives shared by both platforms.
  *
+ *
  * Like fsd_checksum.h, these take raw byte pointers (not a frame struct) so the
  * one implementation works for the Flipper CANFRAME and the ESP32 CanFrame
  * alike, with no frame-type coupling. They were duplicated in both handlers;
