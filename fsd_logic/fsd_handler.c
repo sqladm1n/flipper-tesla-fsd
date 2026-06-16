@@ -1089,10 +1089,13 @@ bool fsd_build_hands_on_spoof(CANFRAME* frame, uint8_t b1, uint8_t b3,
         *integral = (next > 0xFF00u) ? 0xFF00u : next;
     }
 
-    frame->buffer[0] = hands_on_torq_byte;           // byte0: TORQUE (the key signal)
-    frame->buffer[1] = b1;                            // byte1: pass-through (0x0E/0x0F)
+    // byte3 is the torque accumulator (0x0C-0x0E = hands detected)
+    // byte0 is a small rolling counter from the live bus (pass-through)
+    hands_on_torq_byte = (uint8_t)(0x0C + (ho_xorshift32() % 3));  // 0x0C/0x0D/0x0E
+    frame->buffer[0] = b1;                            // byte0: counter (pass-through via b1 slot)
+    frame->buffer[1] = 0x0E;                          // byte1: fixed 0x0E
     frame->buffer[2] = 0xFF;                          // byte2: fixed
-    frame->buffer[3] = b3;                            // byte3: status pass-through (0x0B/0x0C)
+    frame->buffer[3] = hands_on_torq_byte;            // byte3: TORQUE accumulator (key signal)
     frame->buffer[4] = 0x00;                          // byte4: fixed
     frame->buffer[5] = (uint8_t)(*integral & 0xFF);   // byte5: integral lo
     frame->buffer[6] = (uint8_t)((*integral >> 8) & 0xFF); // byte6: integral hi
@@ -1112,8 +1115,8 @@ bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
     // byte1 varies (0x0E/0x0F); byte3 = status byte (0x0B/0x0C), both pass-through.
     // Integral seeded from live value at nag-start so the ramp starts plausibly.
     if(rx_frame->canId == CAN_ID_DAS_HANDSON_SPOOF && rx_frame->data_lenght >= 7) {
-        state->hands_on_b1       = rx_frame->buffer[1];
-        state->hands_on_b3       = rx_frame->buffer[3];
+        state->hands_on_b1       = rx_frame->buffer[0];  // b0=counter, pass to our frame b0
+        state->hands_on_b3       = rx_frame->buffer[3];  // b3=torque, for seeding integral
         // Only update integral seed while NOT actively injecting, so we don't
         // confuse our own TX frames with the car's native frames.
         if(!state->hands_on_nag_active) {
@@ -1126,23 +1129,23 @@ bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
     //   0x22 = autosteer active + hands required (nag)
     //   0x20 = autosteer active, hands satisfied
     //   anything else = AP not active, stop injecting
-    if(rx_frame->canId == 0x3E9 && rx_frame->data_lenght >= 3) {
-        uint8_t b2 = rx_frame->buffer[2];
-        bool nag_now = (b2 == 0x22);
-        bool ap_active = (b2 == 0x20 || b2 == 0x22);
+    // 0x3E9 nag detection (HW3 VehicleBus, confirmed from log analysis):
+    // b1=0x08 = AP active, hands satisfied
+    // b1=0x88 = AP active, hands-on required (nag)
+    // b1=0x00 = AP not active
+    if(rx_frame->canId == 0x3E9 && rx_frame->data_lenght >= 2) {
+        uint8_t b1 = rx_frame->buffer[1];
+        bool nag_now = (b1 == 0x88);
+        bool ap_active = (b1 == 0x08 || b1 == 0x88);
 
         if(nag_now && !state->hands_on_nag_active) {
-            // Rising edge: new nag — start injection from live integral baseline
             state->hands_on_nag_active = true;
             state->hands_on_phase = 0;
             state->hands_on_nag_ms = now_ms;
-            // integral already seeded from last snooped native frame
         } else if(!ap_active) {
-            // AP disengaged entirely — reset
             state->hands_on_nag_active = false;
             state->hands_on_phase = 0;
         } else if(!nag_now && state->hands_on_nag_active) {
-            // Nag cleared (0x20) — stop injecting
             state->hands_on_nag_active = false;
             state->hands_on_phase = 0;
         }
