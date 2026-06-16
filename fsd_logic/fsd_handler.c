@@ -1150,7 +1150,15 @@ bool fsd_handle_hands_on_spoof(FSDState* state, const CANFRAME* rx_frame,
 
     if(!state->hands_on_nag_active) return false;
 
-    fsd_build_hands_on_spoof(out_frame, state->hands_on_b1, state->hands_on_b3,
+// Rate limit: inject at ~8 Hz (one frame per 125 ms) to match the car's
+    // native 0x247 cadence (~5-10 Hz). Without this the handler fires on every
+    // received frame (~300-500 Hz), flooding the bus and disrupting the real
+    // torque signal that DAS needs to see.
+#define HON_INJECT_INTERVAL_MS 125u
+    uint32_t ms_since_last = now_ms - state->hands_on_last_tx_ms;
+    if(ms_since_last < HON_INJECT_INTERVAL_MS) return false;
+
+        fsd_build_hands_on_spoof(out_frame, state->hands_on_b1, state->hands_on_b3,
                               &state->hands_on_integral, state->hands_on_phase);
 
     if(state->hands_on_phase < 0xFFFFu) state->hands_on_phase++;

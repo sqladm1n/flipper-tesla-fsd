@@ -46,6 +46,7 @@ typedef struct FSDState {
     uint16_t hands_on_integral;  // last seen 0x247 bytes5-6 integral, seed for ramp
     uint32_t hands_on_nag_ms;    // ms when current nag started
     uint32_t hands_on_tx_count;  // total 0x247 frames injected (HUD diagnostic)
+    uint32_t hands_on_last_tx_ms;  // timestamp of last 0x247 injection (rate limiter)
 
     // operation mode + diagnostics
     OpMode op_mode;
